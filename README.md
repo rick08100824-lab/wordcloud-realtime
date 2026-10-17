@@ -82,6 +82,19 @@ match /wordcloud_words/{document} {
 - `firestore_query_collection`（MCP 工具）目前 100% 失敗，回 `The requested 'read_time' cannot be in the future.`
 - 這是**上游 bug**，已排除時區因素（`TZ=UTC` 一樣失敗）
 - **替代做法**：改用 `firestore_list_documents` 讀取，需要篩選與統計時在程式端處理
+- 剛部署完 Firestore 規則的頭幾十秒，瀏覽器會出現 `permission-denied`；
+  snapshot listener 被拒後不會自動重試，**重新整理頁面**即可
+- Firebase MCP 的 `firestore_update_document` 沒帶 update mask 時會**整份文件覆蓋**，
+  要改單一欄位請改用 `firestore_add_document` 或提供完整欄位
+
+---
+
+## 發布資訊
+
+- GitHub Pages（學生輸入頁）：https://rick08100824-lab.github.io/wordcloud-realtime/
+- 展示頁：https://rick08100824-lab.github.io/wordcloud-realtime/display.html
+- Repo：https://github.com/rick08100824-lab/wordcloud-realtime
+- QR code：`C:\Users\n0943\Documents\教學工具QR\文字雲-學生輸入頁.png`
 
 ---
 
