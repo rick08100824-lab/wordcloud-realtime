@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>課堂文字雲｜學生輸入</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --ink:#e2e8f0; --muted:#94a3b8;
+    --accent:#38bdf8; --accent2:#22c55e; --danger:#f87171;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; min-height:100dvh; display:flex; flex-direction:column;
+    background:radial-gradient(1200px 600px at 50% -10%, #1d4ed8 0%, var(--bg) 55%);
+    color:var(--ink);
+    font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,-apple-system,sans-serif;
+    padding:20px; gap:16px;
+  }
+  header{text-align:center;}
+  h1{margin:0 0 6px; font-size:clamp(24px,6vw,34px); letter-spacing:2px;}
+  .sub{color:var(--muted); font-size:15px;}
+  main{flex:1; display:flex; flex-direction:column; gap:16px; justify-content:center; max-width:640px; width:100%; margin:0 auto;}
+  .card{background:rgba(30,41,59,.85); border:1px solid rgba(148,163,184,.2); border-radius:20px; padding:20px; backdrop-filter:blur(6px);}
+  label{display:block; font-size:15px; color:var(--muted); margin-bottom:8px;}
+  input[type=text]{
+    width:100%; padding:16px 18px; font-size:22px; border-radius:14px;
+    border:2px solid rgba(148,163,184,.35); background:#0b1220; color:var(--ink); outline:none;
+  }
+  input[type=text]:focus{border-color:var(--accent); box-shadow:0 0 0 4px rgba(56,189,248,.18);}
+  button{
+    margin-top:14px; width:100%; padding:18px; font-size:22px; font-weight:700;
+    border:0; border-radius:14px; color:#052e16; cursor:pointer;
+    background:linear-gradient(180deg,#4ade80,#22c55e);
+    transition:transform .08s ease, filter .2s ease;
+  }
+  button:active{transform:scale(.98);}
+  button:disabled{filter:grayscale(.6) brightness(.8); cursor:not-allowed;}
+  .quick{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;}
+  .quick button{
+    width:auto; margin:0; padding:10px 14px; font-size:16px; font-weight:500;
+    background:rgba(56,189,248,.15); color:var(--accent); border:1px solid rgba(56,189,248,.4);
+  }
+  .stats{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .stat{background:rgba(15,23,42,.6); border-radius:14px; padding:14px; text-align:center;}
+  .stat b{display:block; font-size:28px; color:var(--accent); font-variant-numeric:tabular-nums;}
+  .stat span{font-size:13px; color:var(--muted);}
+  .recent{display:flex; flex-wrap:wrap; gap:8px; min-height:34px;}
+  .chip{background:rgba(148,163,184,.15); border-radius:999px; padding:6px 12px; font-size:15px;}
+  .chip.new{background:rgba(34,197,94,.25); color:#86efac;}
+  #toast{
+    position:fixed; left:50%; bottom:26px; transform:translate(-50%,120%);
+    background:var(--accent2); color:#052e16; font-weight:700; font-size:18px;
+    padding:14px 22px; border-radius:999px; transition:transform .25s ease; z-index:9;
+  }
+  #toast.show{transform:translate(-50%,0);}
+  footer{text-align:center; color:var(--muted); font-size:13px;}
+  a{color:var(--accent);}
+</style>
+</head>
+<body>
+<header>
+  <h1>✏️ 課堂文字雲</h1>
+  <div class="sub">輸入你的答案，展示頁會馬上出現</div>
+</header>
+
+<main>
+  <section class="card">
+    <label for="word">你的答案（一個詞或一句話都可以）</label>
+    <input id="word" type="text" maxlength="30" placeholder="例如：三角形" autocomplete="off">
+    <div class="quick" id="quick"></div>
+    <button id="send">送出</button>
+  </section>
+
+  <section class="card stats">
+    <div class="stat"><b id="sWords">–</b><span>不同的答案</span></div>
+    <div class="stat"><b id="sTotal">–</b><span>累計送出次數</span></div>
+  </section>
+
+  <section class="card">
+    <label>最新送出的答案</label>
+    <div class="recent" id="recent"><span class="chip">載入中…</span></div>
+  </section>
+</main>
+
+<footer>
+  即時同步：Firebase Firestore ｜ <a href="display.html">開啟展示頁 →</a>
+</footer>
+
+<div id="toast"></div>
+
+<script type="module">
+import { firebaseConfig, COLLECTION } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
+import {
+  getFirestore, doc, setDoc, increment, serverTimestamp,
+  collection, onSnapshot, query, orderBy, limit
+} from "https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js";
+
+const db = getFirestore(initializeApp(firebaseConfig));
+
+const input  = document.getElementById("word");
+const sendBtn= document.getElementById("send");
+const toastEl= document.getElementById("toast");
+const quickEl= document.getElementById("quick");
+const recentEl = document.getElementById("recent");
+const sWords = document.getElementById("sWords");
+const sTotal = document.getElementById("sTotal");
+
+// ── 常用選項（老師可自行修改）─────────────────────────
+const QUICK_WORDS = ["三角形", "正方形", "圓形", "長方形", "平行四邊形"];
+QUICK_WORDS.forEach(w => {
+  const b = document.createElement("button");
+  b.textContent = w;
+  b.onclick = () => { input.value = w; input.focus(); };
+  quickEl.appendChild(b);
+});
+
+// ── 送出 ────────────────────────────────────────────
+function sanitize(raw){
+  return raw.trim().replace(/[\/]/g, "／").slice(0, 30);
+}
+
+let busy = false;
+async function submit(){
+  const word = sanitize(input.value);
+  if (!word){ flash("請先輸入答案", false); input.focus(); return; }
+  if (busy) return;
+  busy = true; sendBtn.disabled = true;
+  try{
+    const ref = doc(db, COLLECTION, word);
+    await setDoc(ref, {
+      word,
+      count: increment(1),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    input.value = "";
+    flash("已送出：" + word);
+  }catch(e){
+    console.error(e);
+    flash("送出失敗，請再試一次", false);
+  }finally{
+    setTimeout(()=>{ busy = false; sendBtn.disabled = false; input.focus(); }, 600);
+  }
+}
+
+sendBtn.onclick = submit;
+input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+
+let toastTimer = null;
+function flash(msg, ok = true){
+  toastEl.textContent = msg;
+  toastEl.style.background = ok ? "var(--accent2)" : "var(--danger)";
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1800);
+}
+
+// ── 即時顯示統計與最新答案 ───────────────────────────
+const q = query(collection(db, COLLECTION), orderBy("count", "desc"), limit(300));
+
+onSnapshot(q, snap => {
+  let total = 0;
+  const rows = [];
+  snap.forEach(d => {
+    const v = d.data();
+    total += v.count || 0;
+    rows.push({ word: v.word || d.id, count: v.count || 0, at: v.updatedAt?.toMillis?.() || 0 });
+  });
+  sWords.textContent = rows.length;
+  sTotal.textContent = total;
+
+  rows.sort((a,b) => b.at - a.at);
+  recentEl.innerHTML = "";
+  if (!rows.length){
+    recentEl.innerHTML = '<span class="chip">還沒有人送出，當第一個吧！</span>';
+    return;
+  }
+  rows.slice(0, 8).forEach((r,i) => {
+    const c = document.createElement("span");
+    c.className = "chip" + (i === 0 ? " new" : "");
+    c.textContent = `${r.word} ×${r.count}`;
+    recentEl.appendChild(c);
+  });
+}, err => {
+  console.error(err);
+  recentEl.innerHTML = '<span class="chip">連線失敗，請重新整理</span>';
+});
+
+input.focus();
+</script>
+</body>
+</html>

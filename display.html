@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>課堂文字雲｜展示頁</title>
+<style>
+  :root{ --bg:#070b18; --ink:#e2e8f0; --muted:#8fa3bf; --accent:#38bdf8; --ok:#34d399; }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:radial-gradient(1400px 700px at 50% -20%, #1e3a8a 0%, var(--bg) 60%);
+    color:var(--ink); overflow:hidden;
+    font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,-apple-system,sans-serif;
+    display:flex; flex-direction:column;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:16px 26px; border-bottom:1px solid rgba(148,163,184,.15);
+  }
+  h1{margin:0; font-size:clamp(20px,2.4vw,30px); letter-spacing:3px; white-space:nowrap;}
+  .stats{display:flex; gap:26px; flex-wrap:wrap;}
+  .stat{text-align:center; min-width:78px;}
+  .stat b{display:block; font-size:clamp(20px,2.2vw,30px); color:var(--accent); font-variant-numeric:tabular-nums;}
+  .stat span{font-size:12px; color:var(--muted); letter-spacing:1px;}
+  .live{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--ok);}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--ok); box-shadow:0 0 12px var(--ok); animation:pulse 1.6s infinite;}
+  .dot.off{background:#f87171; box-shadow:0 0 12px #f87171;}
+  @keyframes pulse{50%{opacity:.35;}}
+
+  main{flex:1; display:flex; align-items:center; justify-content:center; padding:10px 26px 26px; overflow:hidden;}
+  #cloud{
+    display:flex; flex-wrap:wrap; align-items:center; justify-content:center;
+    gap:.28em .55em; text-align:center; max-height:100%; overflow:hidden;
+  }
+  .w{
+    display:inline-block; line-height:1.1; font-weight:800; padding:.06em .12em;
+    transition:font-size .45s ease, color .45s ease, transform .45s ease, opacity .3s;
+    animation:pop .45s cubic-bezier(.2,1.4,.5,1);
+    will-change:transform;
+  }
+  @keyframes pop{from{opacity:0; transform:scale(.4) translateY(12px);} to{opacity:1;}}
+  .w.new{ text-shadow:0 0 22px currentColor; }
+  .empty{color:var(--muted); font-size:clamp(18px,3vw,30px); text-align:center; line-height:1.8;}
+
+  footer{display:flex; align-items:center; justify-content:space-between; padding:10px 26px 16px; color:var(--muted); font-size:13px;}
+  a{color:var(--accent); text-decoration:none;}
+  button{
+    background:rgba(148,163,184,.14); color:var(--ink); border:1px solid rgba(148,163,184,.3);
+    border-radius:10px; padding:7px 14px; font-size:13px; cursor:pointer;
+  }
+  button:hover{background:rgba(148,163,184,.25);}
+</style>
+</head>
+<body>
+<header>
+  <h1>☁️ 課堂文字雲</h1>
+  <div class="stats">
+    <div class="stat"><b id="sTotal">0</b><span>送出總次數</span></div>
+    <div class="stat"><b id="sWords">0</b><span>不同答案</span></div>
+    <div class="stat"><b id="sTop">–</b><span>目前最熱門</span></div>
+  </div>
+  <div class="live"><span class="dot" id="dot"></span><span id="liveText">即時連線中</span></div>
+</header>
+
+<main><div id="cloud"><div class="empty">等待第一位同學送出答案…</div></div></main>
+
+<footer>
+  <div>最後更新：<span id="updated">–</span>　｜　<a href="index.html">← 回到輸入頁</a></div>
+  <button id="fs">全螢幕</button>
+</footer>
+
+<script type="module">
+import { firebaseConfig, COLLECTION } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
+import {
+  getFirestore, collection, onSnapshot, query, orderBy, limit
+} from "https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js";
+
+const db = getFirestore(initializeApp(firebaseConfig));
+
+const cloud  = document.getElementById("cloud");
+const sTotal = document.getElementById("sTotal");
+const sWords = document.getElementById("sWords");
+const sTop   = document.getElementById("sTop");
+const updated= document.getElementById("updated");
+const dot    = document.getElementById("dot");
+const liveText = document.getElementById("liveText");
+
+const PALETTE = ["#38bdf8","#f472b6","#facc15","#4ade80","#c084fc","#fb923c","#22d3ee","#f87171","#a3e635"];
+
+// 用文字決定固定的旋轉角度，避免每次更新跳動
+function hash(str){ let h = 0; for (let i=0;i<str.length;i++) h = (h*31 + str.charCodeAt(i)) | 0; return Math.abs(h); }
+
+let prevCounts = new Map();   // 用來判斷「新增的詞」
+let firstRender = true;
+
+const q = query(collection(db, COLLECTION), orderBy("count", "desc"), limit(300));
+
+onSnapshot(q, snap => {
+  dot.classList.remove("off");
+  liveText.textContent = "即時連線中";
+
+  const rows = [];
+  let total = 0;
+  snap.forEach(d => {
+    const v = d.data();
+    const count = v.count || 0;
+    total += count;
+    rows.push({ word: v.word || d.id, count });
+  });
+
+  sTotal.textContent = total;
+  sWords.textContent = rows.length;
+  sTop.textContent = rows.length ? rows[0].word : "–";
+  updated.textContent = new Date().toLocaleTimeString("zh-TW", {hour12:false});
+
+  if (!rows.length){
+    cloud.innerHTML = '<div class="empty">等待第一位同學送出答案…</div>';
+    prevCounts = new Map();
+    firstRender = false;
+    return;
+  }
+
+  const max = rows[0].count;
+  const min = rows[rows.length-1].count;
+  const scale = (c) => {
+    const lo = 22, hi = 92;                                   // 字級範圍（含視窗大小調整）
+    const vw = Math.min(window.innerWidth, window.innerHeight*2.2) / 1440;
+    const k = (hi-lo) * Math.max(.6, Math.min(1.15, vw));
+    if (max === min) return lo + k*0.45;
+    return lo + Math.sqrt((c - min + 1) / (max - min + 1)) * k;
+  };
+
+  const frag = document.createDocumentFragment();
+  rows.forEach((r, i) => {
+    const el = document.createElement("span");
+    el.className = "w";
+    el.textContent = r.word;
+    el.style.fontSize = scale(r.count) + "px";
+    el.style.color = PALETTE[hash(r.word) % PALETTE.length];
+    const rot = ((hash(r.word) % 9) - 4);                     // -4 ~ +4 度
+    el.style.transform = `rotate(${rot}deg)`;
+    el.title = `${r.word}：${r.count} 次`;
+    if (!firstRender && !prevCounts.has(r.word)) el.classList.add("new");
+    frag.appendChild(el);
+  });
+
+  cloud.innerHTML = "";
+  cloud.appendChild(frag);
+
+  prevCounts = new Map(rows.map(r => [r.word, r.count]));
+  firstRender = false;
+}, err => {
+  console.error(err);
+  dot.classList.add("off");
+  liveText.textContent = "連線中斷";
+  cloud.innerHTML = '<div class="empty">連線失敗，請重新整理頁面</div>';
+});
+
+document.getElementById("fs").onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.();
+};
+</script>
+</body>
+</html>
